@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>To-Do Special – Mood Driven</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            transition: background 0.5s ease;
+        }
+        
+        .task-completed {
+            text-decoration: line-through;
+            color: #777;
+        }
+        
+        .badge {
+            font-size: 0.75rem;
+        }
+        
+        .mood-button.active {
+            background-color: #fff !important;
+            border-color: #000 !important;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <div class="container py-4">
+        <!-- Header Section -->
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-start mb-3">
+            <div>
+                <h1 class="fw-bold">To-Do Special</h1>
+                <p class="text-muted">Mood-Driven • Adaptive • Gamified</p>
+            </div>
+            <div id="mood-buttons" class="d-flex gap-2 flex-wrap"></div>
+        </div>
+
+        <!-- Stats Dashboard -->
+        <div class="row g-3 mb-3">
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h6 class="text-muted">Points</h6>
+                        <h3 id="points">0</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h6 class="text-muted">Streak</h6>
+                        <h3 id="streak">0 days</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h6 class="text-muted">Daily Challenge</h6>
+                        <div id="challenge-label">Loading…</div>
+                        <div class="progress mt-2">
+                            <div id="challenge-progress" class="progress-bar" style="width:0%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Add Task Form -->
+        <form id="task-form" class="row g-2 mb-3">
+            <div class="col-md-5">
+                <input type="text" id="task-title" class="form-control" placeholder="Add a task…" required>
+            </div>
+            <div class="col-md-3">
+                <select id="task-difficulty" class="form-select">
+                    <option value="easy">Easy (+10 pts)</option>
+                    <option value="medium" selected>Medium (+20 pts)</option>
+                    <option value="hard">Hard (+35 pts)</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+              <label for="task-due" class="form-label visually-hidden">Due Date</label>
+                <input type="date" id="task-due" class="form-control">
+            </div>
+            <div class="col-md-1 d-grid">
+                <button class="btn btn-dark" type="submit">Add</button>
+            </div>
+        </form>
+
+        <!-- Task List -->
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>Tasks (sorted by mood compatibility)</span>
+                <button id="clear-completed" class="btn btn-sm btn-outline-secondary">Clear Completed</button>
+            </div>
+            <ul id="task-list" class="list-group list-group-flush">
+                <li class="list-group-item text-center text-muted py-4">
+                    No tasks yet. Add one above!
+                </li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const MOODS = [
+            {
+                key: "calm",
+                label: "Calm",
+                emoji: "😌",
+                energy: 0.4,
+                background: "linear-gradient(135deg, #bae6fd, #93c5fd)"
+            },
+            {
+                key: "happy",
+                label: "Happy",
+                emoji: "🙂",
+                energy: 0.7,
+                background: "linear-gradient(135deg, #fde68a, #fcd34d)"
+            },
+            {
+                key: "focused",
+                label: "Focused",
+                emoji: "🧠",
+                energy: 0.85,
+                background: "linear-gradient(135deg, #a7f3d0, #6ee7b7)"
+            },
+            {
+                key: "tired",
+                label: "Tired",
+                emoji: "🥱",
+                energy: 0.25,
+                background: "linear-gradient(135deg, #e5e7eb, #d1d5db)"
+            },
+            {
+                key: "stressed",
+                label: "Stressed",
+                emoji: "😵‍💫",
+                energy: 0.35,
+                background: "linear-gradient(135deg, #c7d2fe, #a5b4fc)"
+            }
+        ];
+
+        const DIFFICULTY_POINTS = {
+            easy: 10,
+            medium: 20,
+            hard: 35
+        };
+
+        const DIFFICULTY_ENERGY = {
+            easy: 0.3,
+            medium: 0.6,
+            hard: 0.85
+        };
+
+        // Application State
+        class TodoApp {
+            constructor() {
+                this.state = {
+                    tasks: this.loadFromStorage("tasks", []),
+                    mood: this.loadFromStorage("mood", "happy"),
+                    points: this.loadFromStorage("points", 0),
+                    streak: this.loadFromStorage("streak", 0),
+                    history: this.loadFromStorage("history", {}),
+                    challenge: this.loadFromStorage("challenge", {})
+                };
+                
+                this.init();
+            }
+
+            // Utility Methods
+            loadFromStorage(key, defaultValue) {
+                try {
+                    const value = localStorage.getItem(key);
+                    return value ? JSON.parse(value) : defaultValue;
+                } catch (error) {
+                    console.warn(`Failed to load ${key} from storage:`, error);
+                    return defaultValue;
+                }
+            }
+
+            saveToStorage() {
+                try {
+                    Object.keys(this.state).forEach(key => {
+                        localStorage.setItem(key, JSON.stringify(this.state[key]));
+                    });
+                } catch (error) {
+                    console.error("Failed to save to storage:", error);
+                }
+            }
+
+            generateId() {
+                return Math.random().toString(36).substr(2, 9);
+            }
+
+            getTodayKey() {
+                return new Date().toISOString().slice(0, 10);
+            }
+
+            getCurrentMood() {
+                return MOODS.find(mood => mood.key === this.state.mood) || MOODS[1];
+            }
+
+            // Task Management
+            addTask(title, difficulty, dueDate) {
+                const task = {
+                    id: this.generateId(),
+                    title: title.trim(),
+                    difficulty: difficulty,
+                    dueDate: dueDate || null,
+                    completed: false,
+                    createdAt: new Date().toISOString()
+                };
+
+                this.state.tasks.unshift(task);
+                this.saveToStorage();
+                this.render();
+            }
+
+            toggleTask(taskId) {
+                const task = this.state.tasks.find(t => t.id === taskId);
+                if (!task) return;
+
+                if (!task.completed) {
+                    // Award points and update stats
+                    this.state.points += DIFFICULTY_POINTS[task.difficulty];
+                    this.updateDailyProgress();
+                    this.updateStreak();
+                    this.updateChallenge(task);
+                }
+
+                task.completed = !task.completed;
+                this.saveToStorage();
+                this.render();
+            }
+
+            removeTask(taskId) {
+                this.state.tasks = this.state.tasks.filter(task => task.id !== taskId);
+                this.saveToStorage();
+                this.render();
+            }
+
+            clearCompleted() {
+                this.state.tasks = this.state.tasks.filter(task => !task.completed);
+                this.saveToStorage();
+                this.render();
+            }
+
+            // Mood and Sorting
+            setMood(moodKey) {
+                this.state.mood = moodKey;
+                this.ensureDailyChallenge();
+                this.saveToStorage();
+                this.render();
+            }
+
+            calculateTaskScore(task, moodEnergy) {
+                const taskEnergy = DIFFICULTY_ENERGY[task.difficulty];
+                const energyMatch = 1 - Math.abs(taskEnergy - moodEnergy);
+                const dueDateBonus = task.dueDate ? 0.2 : 0.1;
+                return energyMatch + dueDateBonus;
+            }
+
+            getSortedTasks() {
+                const moodEnergy = this.getCurrentMood().energy;
+                return [...this.state.tasks].sort((a, b) => {
+                    return this.calculateTaskScore(b, moodEnergy) - this.calculateTaskScore(a, moodEnergy);
+                });
+            }
+
+            // Progress Tracking
+            updateDailyProgress() {
+                const todayKey = this.getTodayKey();
+                const todayHistory = this.state.history[todayKey] || {};
+                
+                this.state.history[todayKey] = {
+                    ...todayHistory,
+                    completed: (todayHistory.completed || 0) + 1
+                };
+            }
+
+            updateStreak() {
+                this.state.streak += 1;
+            }
+
+            updateChallenge(completedTask) {
+                if (this.state.challenge.filter && this.state.challenge.filter(completedTask)) {
+                    this.state.challenge.progress = (this.state.challenge.progress || 0) + 1;
+                }
+            }
+
+            // Daily Challenge System
+            ensureDailyChallenge() {
+                const todayKey = this.getTodayKey();
+                if (this.state.challenge.date === todayKey) return;
+
+                const mood = this.getCurrentMood();
+                let challenge;
+
+                if (mood.energy < 0.4) {
+                    challenge = {
+                        label: "Complete 2 easy tasks",
+                        target: 2,
+                        filter: task => task.difficulty === "easy"
+                    };
+                } else if (mood.energy < 0.7) {
+                    challenge = {
+                        label: "Complete any 2 tasks",
+                        target: 2,
+                        filter: task => true
+                    };
+                } else {
+                    challenge = {
+                        label: "Complete 1 hard + 1 medium task",
+                        target: 2,
+                        filter: task => ["medium", "hard"].includes(task.difficulty)
+                    };
+                }
+
+                this.state.challenge = {
+                    date: todayKey,
+                    progress: 0,
+                    ...challenge
+                };
+
+                this.saveToStorage();
+            }
+
+            // Rendering
+            renderMoodButtons() {
+                const container = document.getElementById("mood-buttons");
+                container.innerHTML = "";
+
+                MOODS.forEach(mood => {
+                    const button = document.createElement("button");
+                    button.className = `btn btn-light mood-button ${mood.key === this.state.mood ? 'active' : ''}`;
+                    button.innerHTML = `${mood.emoji} ${mood.label}`;
+                    button.onclick = () => this.setMood(mood.key);
+                    container.appendChild(button);
+                });
+            }
+
+            renderStats() {
+                document.getElementById("points").textContent = this.state.points;
+                document.getElementById("streak").textContent = `${this.state.streak} days`;
+                
+                const challengeLabel = this.state.challenge.label || "No challenge";
+                document.getElementById("challenge-label").textContent = challengeLabel;
+                
+                const progress = Math.min(100, Math.round(
+                    ((this.state.challenge.progress || 0) / (this.state.challenge.target || 1)) * 100
+                ));
+                document.getElementById("challenge-progress").style.width = `${progress}%`;
+            }
+
+            renderTasks() {
+                const taskList = document.getElementById("task-list");
+                const sortedTasks = this.getSortedTasks();
+
+                if (sortedTasks.length === 0) {
+                    taskList.innerHTML = `
+                        <li class="list-group-item text-center text-muted py-4">
+                            No tasks yet. Add one above!
+                        </li>
+                    `;
+                    return;
+                }
+
+                taskList.innerHTML = "";
+                
+                sortedTasks.forEach(task => {
+                    const listItem = document.createElement("li");
+                    listItem.className = "list-group-item d-flex justify-content-between align-items-center";
+                    
+                    listItem.innerHTML = `
+                        <div class="d-flex align-items-center">
+                            <input type="checkbox" ${task.completed ? "checked" : ""} 
+                                   class="form-check-input me-3">
+                            <div>
+                                <span class="${task.completed ? "task-completed" : ""}">${task.title}</span>
+                                <div class="mt-1">
+                                    <span class="badge bg-secondary me-1">${task.difficulty}</span>
+                                    ${task.dueDate ? `<span class="badge bg-info me-1">${task.dueDate}</span>` : ""}
+                                    <span class="badge bg-warning text-dark">+${DIFFICULTY_POINTS[task.difficulty]} pts</span>
+                                </div>
+                            </div>
+                        </div>
+                        <button class="btn btn-sm btn-outline-danger">
+                            <span aria-hidden="true">&times;</span>
+                        </button>
+                    `;
+
+                    // Event listeners
+                    const checkbox = listItem.querySelector("input");
+                    const deleteButton = listItem.querySelector("button");
+                    
+                    checkbox.addEventListener("change", () => this.toggleTask(task.id));
+                    deleteButton.addEventListener("click", () => this.removeTask(task.id));
+
+                    taskList.appendChild(listItem);
+                });
+            }
+
+            render() {
+                // Update background
+                const mood = this.getCurrentMood();
+                document.body.style.background = mood.background;
+
+                // Render components
+                this.renderMoodButtons();
+                this.renderStats();
+                this.renderTasks();
+            }
+
+            // Event Handlers
+            setupEventListeners() {
+                // Task form submission
+                const taskForm = document.getElementById("task-form");
+                taskForm.addEventListener("submit", (e) => {
+                    e.preventDefault();
+                    
+                    const title = document.getElementById("task-title").value.trim();
+                    const difficulty = document.getElementById("task-difficulty").value;
+                    const dueDate = document.getElementById("task-due").value;
+                    
+                    if (!title) return;
+                    
+                    this.addTask(title, difficulty, dueDate);
+                    
+                    // Reset form
+                    document.getElementById("task-title").value = "";
+                    document.getElementById("task-due").value = "";
+                });
+
+                // Clear completed tasks
+                const clearButton = document.getElementById("clear-completed");
+                clearButton.addEventListener("click", () => this.clearCompleted());
+            }
+
+            // Initialization
+            init() {
+                this.ensureDailyChallenge();
+                this.setupEventListeners();
+                this.render();
+            }
+        }
+
+        // Initialize the app
+        document.addEventListener("DOMContentLoaded", () => {
+            new TodoApp();
+        });
+    </script>
+</body>
+</html>
